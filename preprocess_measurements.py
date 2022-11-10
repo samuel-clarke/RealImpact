@@ -64,7 +64,7 @@ def deconvolve_hammer(signal, hammer):
 
 def get_mic_world_space(angle, distance, ind):
     mic_z = -(MIC_BAR_LENGTH/2) + ind/14 * MIC_BAR_LENGTH
-    mic_x = 300 + distance
+    mic_x = 230 + distance
     mic_y = -((45/2) + 20.95) * np.ones_like(angle)
     mic_points = np.vstack((mic_x, mic_y, mic_z)).transpose()
     rot = Rotation.from_euler('z', angle, degrees=True)
