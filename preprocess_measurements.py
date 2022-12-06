@@ -121,21 +121,14 @@ hammers_norm = normalize_gains(hammers, hammer_gains)
 deconvolved = deconvolve_hammer(audios_norm, hammers_norm)
 deconvolved *= 0.99 / np.max(np.abs(deconvolved))
 
-peak_inds = np.argmax(np.abs(audios), axis=1)
-trim_audio = np.zeros_like(audios)
-trim_length = audios.shape[1] - np.max(peak_inds)
-for i in range(audios.shape[0]):
-    start = peak_inds[i]
-    trim_audio[i,:trim_length] = audios[i, start:(start+trim_length)]
-trim_audio = trim_audio[:, :trim_length]
-
-mesh = trimesh.load(os.path.join(data_dir, 'preprocessed/transformed.obj'), process=False)
+mesh = trimesh.load(os.path.join(data_dir, 'preprocessed/transformed.obj'), process=False, maintain_order=True)
 vertex_positions = mesh.vertices[vertex_ids, :]
 vertex_positions = np.repeat(vertex_positions, 15, axis=0)
 
 listener_positions = get_mic_world_space(positions[:, 0], positions[:, 1], positions[:,2])
 
-np.save(os.path.join(data_dir,'preprocessed/sounds.npy'), trim_audio)
+np.save(os.path.join(data_dir,'preprocessed/sounds.npy'), audios_norm / np.max(np.abs(audios_norm))/ 1.01)
+np.save(os.path.join(data_dir,'preprocessed/hammers.npy'), hammers_norm)
 np.save(os.path.join(data_dir,'preprocessed/deconvolved.npy'), deconvolved)
 np.save(os.path.join(data_dir,'preprocessed/vertexID.npy'), np.repeat(vertex_ids, 15, axis=0))
 np.save(os.path.join(data_dir,'preprocessed/listenerXYZ.npy'), listener_positions)

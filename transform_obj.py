@@ -23,7 +23,7 @@ def apply_transform(points, transform):
     print(transform.matrix)
     return x_tf.transpose()
 
-original_mesh = trimesh.load(filename, process=False)
+original_mesh = trimesh.load(filename, process=False, maintain_order=True)
 temp_mesh = original_mesh.copy()
 
 transform_matrix = np.loadtxt(os.path.join(args.directory, 'preprocessed', 'transform.txt'), delimiter=' ')
