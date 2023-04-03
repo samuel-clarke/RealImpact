@@ -12,24 +12,35 @@ import trimesh
 
 parser = argparse.ArgumentParser()
 parser.add_argument('directory', type=str, help='foo help')
+parser.add_argument('--no_transform', dest='transform', action='store_false', help='Do not use pretrained VGGish weights')
+parser.set_defaults(transform=True)
+parser.add_argument('--num_microphones', type=int, default=15, help='Random seed')
 args = parser.parse_args()
 
 data_dir = args.directory
 MAX_INT16 = 32767
-NUM_MICROPHONES = 15
+NUM_MICROPHONES = args.num_microphones
 MIC_BAR_LENGTH = 1890 - 70
 
 def normalize_gains(signal, gains):
     signal_fl = signal.astype(np.float32)
+    max_gain = np.max(gains)
     for i in range(signal_fl.shape[0]):
-        signal_fl[i, :] *= db_to_float(np.max(gains) - gains[i])
-    return signal_fl
+        signal_fl[i, :] *= db_to_float(max_gain - gains[i])
+    return signal_fl, max_gain
+
+def normalize_gains_dB(signal, gains, dB):
+    signal_fl = signal.astype(np.float32)
+    max_gain = np.max(gains)
+    for i in range(signal_fl.shape[0]):
+        signal_fl[i, :] *= db_to_float(dB - gains[i])
+    return signal_fl, max_gain
 
 def window_hammer_signal(signal, threshold_ratio):
-    # Here I am finding the max value in the hamnmer signal, then looking 
+    # Find the max value in the hamnmer signal, then look 
     # for where the signal is below a threshold on either side, i.e. when 
     # there is no force being recorded. Those samples are then set to 0 as 
-    # we know they are noise. 
+    # they are assumed to be noise. 
     max_val = np.max(signal, axis=1)
     max_val_idx = np.argmax(signal, axis=1)
     
@@ -38,15 +49,16 @@ def window_hammer_signal(signal, threshold_ratio):
     for i in range(signal.shape[0]):
         if (i % 100) == 0:
             print(i)
-        curr_min_idx = max_val_idx[i] + np.argmax(signal[i, :(max_val_idx[i])+1:-1] < (threshold_ratio * max_val[i]))
+        curr_min_idx = max_val_idx[i] - np.argmax(signal[i, (max_val_idx[i])::-1] < (threshold_ratio * max_val[i]))
         max_idx = max_val_idx[i] + np.argmax(signal[i, max_val_idx[i]:] < (threshold_ratio * max_val[i]))
         windowed_signal[i, 0:(max_idx-curr_min_idx)] = signal[i, curr_min_idx:max_idx]
         min_idx[i] = curr_min_idx
+    print(i)
     
     return windowed_signal, min_idx
 
 def deconvolve_hammer(signal, hammer):
-    windowed_hammers, window_idx = window_hammer_signal(hammer, 0.01)
+    windowed_hammers, window_idx = window_hammer_signal(hammer, 0.02)
     windowed_hammers = np.repeat(windowed_hammers, NUM_MICROPHONES, axis=0).astype(np.float32)
     window_idx = np.repeat(window_idx, NUM_MICROPHONES, axis=0)
     deconvolved_signal = np.zeros_like(signal).astype(np.float32)
@@ -58,6 +70,7 @@ def deconvolve_hammer(signal, hammer):
         deconvolved_signal[i, :end_ind] = signal[i, window_idx[i]:]  
         deconvolved_signal[i, :end_ind] = np.real(np.fft.ifft(np.fft.fft(deconvolved_signal[i,:end_ind])
                                                        /np.fft.fft(windowed_hammers[i,:end_ind])))
+    print(i)
     # Cut off end of deconvolved signal to remove ramp up at the end.
     deconvolved_signal = deconvolved_signal[:, :-int(fs*0.1)]
     return deconvolved_signal
@@ -114,22 +127,34 @@ vertex_ids = np.array(vertex_ids)
 mic_gains = np.array(mic_gains)
 mic_pads = np.array(mic_pads, dtype=bool)
 mic_adj_gains = mic_gains + 20 * np.logical_not(mic_pads)
+hammer_gains = np.array(hammer_gains)
+hammer_pads = np.array(hammer_pads)
+hammer_adj_gains = hammer_gains + 20 * np.logical_not(hammer_pads)
 
-audios_norm = normalize_gains(audios, mic_adj_gains)
-hammers_norm = normalize_gains(hammers, hammer_gains)
+# Normalize to 20dB adjusted, 0dB unadjusted gain
+audios_norm, audios_gain = normalize_gains_dB(audios, mic_adj_gains, 20)
+if np.max(np.abs(hammers)) > 100:
+    hammers = hammers / MAX_INT16
+
+hammers_norm, hammers_gain = normalize_gains_dB(hammers, hammer_adj_gains, 20)
+
+hammers_newtons = 1.11 * (1/.02558) * hammers_norm
 
 deconvolved = deconvolve_hammer(audios_norm, hammers_norm)
-deconvolved *= 0.99 / np.max(np.abs(deconvolved))
-
-mesh = trimesh.load(os.path.join(data_dir, 'preprocessed/transformed.obj'), process=False, maintain_order=True)
-vertex_positions = mesh.vertices[vertex_ids, :]
-vertex_positions = np.repeat(vertex_positions, 15, axis=0)
+deconvolved_norm = deconvolved * 0.99 / np.max(np.abs(deconvolved))
 
 listener_positions = get_mic_world_space(positions[:, 0], positions[:, 1], positions[:,2])
 
 np.save(os.path.join(data_dir,'preprocessed/sounds.npy'), audios_norm / np.max(np.abs(audios_norm))/ 1.01)
+np.save(os.path.join(data_dir, 'preprocessed/sounds_0db'), audios_norm)
 np.save(os.path.join(data_dir,'preprocessed/hammers.npy'), hammers_norm)
-np.save(os.path.join(data_dir,'preprocessed/deconvolved.npy'), deconvolved)
+np.save(os.path.join(data_dir, 'preprocessed/hammer_newtons.npy'), hammers_newtons)
+np.save(os.path.join(data_dir,'preprocessed/deconvolved.npy'), deconvolved_norm)
+np.save(os.path.join(data_dir,'preprocessed/deconvolved_0db.npy'), deconvolved)
 np.save(os.path.join(data_dir,'preprocessed/vertexID.npy'), np.repeat(vertex_ids, 15, axis=0))
 np.save(os.path.join(data_dir,'preprocessed/listenerXYZ.npy'), listener_positions)
-np.save(os.path.join(data_dir,'preprocessed/vertexXYZ.npy'), vertex_positions)
+if args.transform:
+    mesh = trimesh.load(os.path.join(data_dir, 'preprocessed/transformed.obj'), process=False, maintain_order=True)
+    vertex_positions = mesh.vertices[vertex_ids, :]
+    vertex_positions = np.repeat(vertex_positions, 15, axis=0)
+    np.save(os.path.join(data_dir,'preprocessed/vertexXYZ.npy'), vertex_positions)
