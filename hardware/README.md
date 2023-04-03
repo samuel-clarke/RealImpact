@@ -1,0 +1,2 @@
+# RealImpact Hardware Designs
+Please see the [gantry](gantry) directory and the [striker](striker) directory for the parts lists, CAD files, and code required to construct and control the microphone gantry and the impact hammer striking mechanism, respectively.
